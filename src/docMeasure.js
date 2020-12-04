@@ -555,8 +555,8 @@ DocMeasure.prototype.measureTable = function (node) {
 
 	var colSpans = [];
 	var col, row, cols, rows;
-
-	for (col = 0, cols = node.table.body[0].length; col < cols; col++) {
+	var firstrow = node.table.body[0];
+	for (col = 0, cols = ((firstrow)?firstrow.length:0); col < cols; col++) {
 		var c = node.table.widths[col];
 		c._minWidth = 0;
 		c._maxWidth = 0;

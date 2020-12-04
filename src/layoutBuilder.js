@@ -139,6 +139,8 @@ LayoutBuilder.prototype.layoutDocument = function (docStructure, fontProvider, s
 		result = this.tryLayoutDocument(docStructure, fontProvider, styleDictionary, defaultStyle, background, header, footer, images, watermark);
 	}
 
+	result.linearNodeList.forEach(function(node,i) { node.MCID = i;});
+
 	return result.pages;
 };
 
@@ -519,12 +521,12 @@ LayoutBuilder.prototype.processRow = function (columns, widths, gaps, tableBody,
 		widths = widths || columns;
 
 		self.writer.context().beginColumnGroup();
-
+		var isLastRow = (tableRow == (tableBody.length - 1));
 		for (var i = 0, l = columns.length; i < l; i++) {
 			var column = columns[i];
 			var width = widths[i]._calcWidth;
 			var leftOffset = colLeftOffset(i);
-
+			var isLastColumn = (i == (columns.length - 1));
 			if (column.colSpan && column.colSpan > 1) {
 				for (var j = 1; j < column.colSpan; j++) {
 					width += widths[++i]._calcWidth + gaps[i];
@@ -533,7 +535,31 @@ LayoutBuilder.prototype.processRow = function (columns, widths, gaps, tableBody,
 
 			self.writer.context().beginColumn(width, leftOffset, getEndingCell(column, i));
 			if (!column._span) {
+				var _breaks = pageBreaks.length;
 				self.processNode(column);
+				var FORCE_TABLE_CLOSE = false;
+				var USE_ONETIME_CLOSE = false;
+				if (FORCE_TABLE_CLOSE && isLastRow && isLastColumn && column.tags) {
+					var lastopentag = -1;
+					for (var m = 0; m < column.tags.length; m++) {
+						if (typeof column.tags[m] == 'string' && column.tags[m][0] != '/') {
+						lastopentag = m;
+					}}
+					if (lastopentag >= 0) {
+						switch (column.tags[lastopentag]) {
+						case 'TD': column.tags = column.tags.slice(0,lastopentag+1).concat(['/TD','/TR','/Table']); break;
+						case 'TH': column.tags = column.tags.slice(0,lastopentag+1).concat(['/TH','/TR','/Table']); break;
+						}
+					}
+				} else if (USE_ONETIME_CLOSE && pageBreaks.length > _breaks && i==0) { /* did that just insert a break */
+					var pr = tableBody[tableRow-1]; /* after a previous table row */
+					var last = pr.length - 1;
+					if (pr[0].tags && pr[0].tags.includes('TR')  /* that was tagged with TR */
+							&& pr[last].tags) { /* and its last column was tagged ? */
+						pr[last].tags.push({onetime:1}); /* then surgically insert a marker for a once-only pop. */
+						/* because the header rows - which typically start with 'Table' - are repeated */
+					}
+				}
 				addAll(positions, column.positions);
 			} else if (column._columnEndingContext) {
 				// row-span ending
@@ -632,7 +658,7 @@ LayoutBuilder.prototype.processTable = function (tableNode) {
 	var processor = new TableProcessor(tableNode);
 
 	processor.beginTable(this.writer);
-
+	var _startRowPage, _endRowPage = Infinity;
 	var rowHeights = tableNode.table.heights;
 	for (var i = 0, l = tableNode.table.body.length; i < l; i++) {
 		processor.beginRow(i, this.writer);
@@ -653,7 +679,16 @@ LayoutBuilder.prototype.processTable = function (tableNode) {
 		var result = this.processRow(tableNode.table.body[i], tableNode.table.widths, tableNode._offsets.offsets, tableNode.table.body, i, height);
 		addAll(tableNode.positions, result.positions);
 
+		var _startRowPage = _endRowPage;
 		processor.endRow(i, this.writer, result.pageBreaks);
+		var _endRowPage = this.writer.writer.context.page;
+		var WATCH_PAGE_BOUNDARY = true;
+		if (WATCH_PAGE_BOUNDARY && _startRowPage < _endRowPage) {
+			console.log("INFO: TABLE OF "+tableNode.table.body.length+ " ROWS, AT ROW "+i+" CROSSED FROM PAGE "+_startRowPage+" TO "+_endRowPage);
+			var b = tableNode.table.body;
+			var p = b[i-1].length-1;
+			b[i-1][p].tags.push({onetime:1});
+		}
 	}
 
 	processor.endTable(this.writer);
@@ -662,7 +697,7 @@ LayoutBuilder.prototype.processTable = function (tableNode) {
 // leafs (texts)
 LayoutBuilder.prototype.processLeaf = function (node) {
 	var line = this.buildNextLine(node);
-	if (line && (node.tocItem || node.id)) {
+	if (line && (node.tocItem || node.id || node.tags)) {
 		line._node = node;
 	}
 	var currentHeight = (line) ? line.getHeight() : 0;
@@ -730,7 +765,7 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 
 	var line = new Line(this.writer.context().availableWidth);
 	var textTools = new TextTools(null);
-
+	['tags','tag'].forEach(function (k) { if (textNode[k]) { line[k] = textNode[k] }});
 	var isForceContinue = false;
 	while (textNode._inlines && textNode._inlines.length > 0 &&
 		(line.hasEnoughSpaceForInline(textNode._inlines[0], textNode._inlines.slice(1)) || isForceContinue)) {
@@ -764,7 +799,7 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 	}
 
 	line.lastLineInParagraph = textNode._inlines.length === 0;
-
+	textNode._inlines.map(function (inline) {inline.fromTextNode = textNode;}); /*wch*/
 	return line;
 };
 

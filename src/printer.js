@@ -127,6 +127,12 @@ PdfPrinter.prototype.createPdfKitDocument = function (docDefinition, options) {
 		bufferPages: options.bufferPages || false,
 		autoFirstPage: false,
 		font: null
+		,tabs: docDefinition.tabs || 'S'
+		,title: docDefinition.title || ''
+		,displayTitle: docDefinition.displayTitle || docDefinition.displayDocTitle
+		,lang: docDefinition.lang
+		,tagged: true
+		,marked: docDefinition.marked
 	};
 
 	this.pdfKitDoc = PdfKitEngine.createPdfDocument(pdfOptions);

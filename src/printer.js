@@ -473,6 +473,87 @@ function renderLine(line, x, y, pdfKitDoc) {
 
 	textDecorator.drawBackground(line, x, y, pdfKitDoc);
 
+	var lastOpenedStructTag = null;
+	var lastOpenedStructElement = null;
+	var lastClosedStructElement = null;
+
+	if (!isUndefined(line.tags) && line.tags.length > 0) {
+		/* text items only may have tags, and if they have tags, must have at least one opening tag. */
+		/* 'TH' and '/TH' are examples of opening and closing tags, respectively */
+		/* tags is an array such as ['Table','TR','TH','/TH'] or ['TD','/TD','/TR'] or ['TD',2] or ['TD',2,{onetime:1}] */
+		if (!pdfKitDoc.stk) {
+			const root = pdfKitDoc.struct('Document');
+			pdfKitDoc.addStructure(root);
+			pdfKitDoc.stk = [ root ];
+		}
+
+		var lifo = [];
+		var tagListPretty = line.tags.toString();
+		var stackPretty = pdfKitDoc.stk.slice(0,-1).map(function (se) {return se.dictionary.data.S;}).concat(['ROOT']);
+		for (var i = 0; i < line.tags.length; i++) {
+			/* process the array of tags - build the structure elements and push them on a stack */
+			var tagitem = line.tags[i];
+			var pops = 0;
+			switch (typeof tagitem) {
+			case 'string' :
+				var parentItem = pdfKitDoc.stk[0].dictionary.data.S;
+				if (tagitem.length == 0) break; /* zero-length tag.. ignore it */
+				if (tagitem[0]=="/") {
+					// Checks for match at the top of the stack, and if it's there, pop it.
+					if (parentItem != tagitem.slice(1)) {
+						console.log('WARNING: '+tagListPretty+' tried to close element "'+parentItem+'" with stack "'+stackPretty+'".  Ignoring it.')
+					} else {
+						lastClosedStructElement = pdfKitDoc.stk[0];
+						pdfKitDoc.stk.shift();
+					}
+				} else { /* push opening tag onto the stack.  Warn of bad constructs. */
+                	/* check syntax but proceed through warnings */
+					var good = {Table : ['TR'],TR : ['TD','TH'],L:['LI'],LI:['Lbl','LBody']}
+					var bad = {
+						H: ['H','TR','TD','TH'],
+						H1:['H','H1','TR','TD','TH'],
+						H2:['H','H1','H2','TR','TD','TH'],
+						H3:['H','H1','H2','H3','TR','TD','TH'],
+						H4:['H','H1','H2','H3','H4','TR','TD','TH'],
+						H5:['H','H1','H2','H3','H4','H5','TR','TD','TH'],
+						H6:['H','H1','H2','H3','H4','H5','H6','TR','TD','TH']
+						}
+						if ((parentItem in good && !good[parentItem].includes(tagitem))
+							|| (parentItem in bad && bad[parentItem].includes(tagitem))) {
+							console.log('WARNING: "'+parentItem+'" child "'+tagitem+'" will not pass accessibility checks.');
+						}
+						lastOpenedStructTag = tagitem;
+						lastOpenedStructElement = pdfKitDoc.struct(lastOpenedStructTag);
+						pdfKitDoc.stk[0].add(lastOpenedStructElement);
+						pdfKitDoc.stk.unshift(lastOpenedStructElement);
+					} // else
+				break;
+			case 'object' : /* very special case, the object {onetime:<<n>>} inserted when layout builder breaks a table across a page */
+				pops = tagitem;
+				if (typeof tagitem == 'object') {
+					pops = ((tagitem.onetime)?(tagitem.onetime):0);
+					console.log('INFO: '+tagListPretty+' is a onetime pop of '+pops+' from curent stack '+stackPretty+'.');
+					lifo.unshift(i); /* save an indication of the onetime pop */
+				}
+				if (pdfKitDoc.stk.length <= pops) {
+					console.log('WARNING: '+tagListPretty+' TRIED TO POP THE ROOT STRUCTURE ELEMENT, IGNORING FOR NOW, BUT YOU MUST FIX THIS.');
+				}
+				for (var j = 0; j < Math.min(pops,(pdfKitDoc.stk.length - 1)); j++) {
+					pdfKitDoc.stk.shift();
+					};
+				break;
+			default:
+				console.log('WARNING: Ignoring object '+tagitem.toString()+' in tags.')
+				} // switch
+			} // for
+		// lifo.map(function(k) { line.tags.splice(k,1) }); // get rid of any onetime pops you used.
+		} // end if tags
+
+	var structContent = null;
+    if (lastOpenedStructTag) {
+        structContent = pdfKitDoc.markStructureContent(lastOpenedStructTag);
+    }
+
 	//TODO: line.optimizeInlines();
 	for (var i = 0, l = line.inlines.length; i < l; i++) {
 		var inline = line.inlines[i];
@@ -519,10 +600,17 @@ function renderLine(line, x, y, pdfKitDoc) {
 				Dest: [inline.linkToPage - 1, 'XYZ', null, null, null]
 			});
 		}
-
 	}
 	// Decorations won't draw correctly for superscript
 	textDecorator.drawDecorations(line, x, y, pdfKitDoc);
+
+	if (structContent != null) {
+		pdfKitDoc.endMarkedContent();
+		lastOpenedStructElement.add(structContent)
+	}
+    if (lastClosedStructElement != null) {
+        lastClosedStructElement.end();
+    }
 }
 
 function renderWatermark(page, pdfKitDoc) {

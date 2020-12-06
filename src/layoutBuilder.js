@@ -662,7 +662,7 @@ LayoutBuilder.prototype.processTable = function (tableNode) {
 // leafs (texts)
 LayoutBuilder.prototype.processLeaf = function (node) {
 	var line = this.buildNextLine(node);
-	if (line && (node.tocItem || node.id)) {
+	if (line && (node.tocItem || node.id || node.tags)) {
 		line._node = node;
 	}
 	var currentHeight = (line) ? line.getHeight() : 0;
@@ -730,7 +730,7 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 
 	var line = new Line(this.writer.context().availableWidth);
 	var textTools = new TextTools(null);
-
+	['tags','tag'].forEach(function (k) { if (textNode[k]) { line[k] = textNode[k] }});
 	var isForceContinue = false;
 	while (textNode._inlines && textNode._inlines.length > 0 &&
 		(line.hasEnoughSpaceForInline(textNode._inlines[0], textNode._inlines.slice(1)) || isForceContinue)) {
@@ -764,7 +764,7 @@ LayoutBuilder.prototype.buildNextLine = function (textNode) {
 	}
 
 	line.lastLineInParagraph = textNode._inlines.length === 0;
-
+	textNode._inlines.map(function (inline) {inline.fromTextNode = textNode;});
 	return line;
 };
 

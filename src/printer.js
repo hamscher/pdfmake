@@ -477,10 +477,10 @@ function renderLine(line, x, y, pdfKitDoc) {
 	var lastOpenedStructElement = null;
 	var lastClosedStructElement = null;
 
-	if (!isUndefined(line.tags) && line.tags.length > 0) {
+	if (!isUndefined(line.tags) && line.tags.length > 0 && ('startsNode' in line || 'endsNode' in line)) {
 		/* text items only may have tags, and if they have tags, must have at least one opening tag. */
 		/* 'TH' and '/TH' are examples of opening and closing tags, respectively */
-		/* tags is an array such as ['Table','TR','TH','/TH'] or ['TD','/TD','/TR'] or ['TD',2] or ['TD',2,{onetime:1}] */
+		/* tags is an array such as ['Table','TR','TH','/TH'] or ['TD','/TD','/TR'] or ['TD',{onetime:1}] */
 		if (!pdfKitDoc.stk) {
 			const root = pdfKitDoc.struct('Document');
 			pdfKitDoc.addStructure(root);
@@ -498,7 +498,7 @@ function renderLine(line, x, y, pdfKitDoc) {
 			case 'string' :
 				var parentItem = pdfKitDoc.stk[0].dictionary.data.S;
 				if (tagitem.length == 0) break; /* zero-length tag.. ignore it */
-				if (tagitem[0]=="/") {
+				if (tagitem[0]=="/" && 'endsNode' in line) {
 					// Checks for match at the top of the stack, and if it's there, pop it.
 					if (parentItem != tagitem.slice(1)) {
 						console.log('WARNING: '+tagListPretty+' tried to close element "'+parentItem+'" with stack "'+stackPretty+'".  Ignoring it.')
@@ -506,8 +506,8 @@ function renderLine(line, x, y, pdfKitDoc) {
 						lastClosedStructElement = pdfKitDoc.stk[0];
 						pdfKitDoc.stk.shift();
 					}
-				} else { /* push opening tag onto the stack.  Warn of bad constructs. */
-                	/* check syntax but proceed through warnings */
+				} else if (tagitem[0]!="/" && 'startsNode' in line) { /* push opening tag onto the stack.  Warn of bad constructs. */
+					/* check syntax but proceed through warnings */
 					var good = {Table : ['TR'],TR : ['TD','TH'],L:['LI'],LI:['Lbl','LBody']}
 					var bad = {
 						H: ['H','TR','TD','TH'],
@@ -550,9 +550,11 @@ function renderLine(line, x, y, pdfKitDoc) {
 		} // end if tags
 
 	var structContent = null;
-    if (lastOpenedStructTag) {
-        structContent = pdfKitDoc.markStructureContent(lastOpenedStructTag);
-    }
+	if ('startsNode' in line) { // if this begins a new node
+		if (lastOpenedStructTag) { // and there is some structure to populate
+			structContent = pdfKitDoc.markStructureContent(lastOpenedStructTag); // then start
+		}
+	}
 
 	//TODO: line.optimizeInlines();
 	for (var i = 0, l = line.inlines.length; i < l; i++) {
@@ -604,13 +606,17 @@ function renderLine(line, x, y, pdfKitDoc) {
 	// Decorations won't draw correctly for superscript
 	textDecorator.drawDecorations(line, x, y, pdfKitDoc);
 
-	if (structContent != null) {
-		pdfKitDoc.endMarkedContent();
-		lastOpenedStructElement.add(structContent)
+	
+	if ('endsNode' in line) { // if this was its last line of text to add
+		if (structContent != null) { // to some piece of structure
+			pdfKitDoc.endMarkedContent(); // then mark it ended
+			lastOpenedStructElement.add(structContent)
+		}
+		if (lastClosedStructElement != null) { // close whatever was popped off the stack
+			lastClosedStructElement.end();
+    	}
 	}
-    if (lastClosedStructElement != null) {
-        lastClosedStructElement.end();
-    }
+	
 }
 
 function renderWatermark(page, pdfKitDoc) {

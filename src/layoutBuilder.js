@@ -664,6 +664,7 @@ LayoutBuilder.prototype.processLeaf = function (node) {
 	var line = this.buildNextLine(node);
 	if (line && (node.tocItem || node.id || node.tags)) {
 		line._node = node;
+		line.startsNode = true;
 	}
 	var currentHeight = (line) ? line.getHeight() : 0;
 	var maxHeight = node.maxHeight || -1;
@@ -694,13 +695,16 @@ LayoutBuilder.prototype.processLeaf = function (node) {
 			}
 		}
 	}
-
+	var previousLine = line;
 	while (line && (maxHeight === -1 || currentHeight < maxHeight)) {
 		var positions = this.writer.addLine(line);
 		node.positions.push(positions);
 		line = this.buildNextLine(node);
 		if (line) {
+			previousLine = line;
 			currentHeight += line.getHeight();
+		} else if (previousLine) {
+			previousLine.endsNode = true;
 		}
 	}
 };
